@@ -10,63 +10,65 @@ st.success("성공적으로 앱이 실행되었습니다! 🎉")
 import streamlit as st
 import numpy as np
 from astropy.io import fits
-import matplotlib.pyplot as plt
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz
+from astropy.time import Time
+from datetime import datetime
+import math
 
-st.title("🌟 성단 색지수 분석으로 소광 추정하기")
+st.title("🌤️ 대기 소광 보정 앱")
 
-st.write("""
-성단의 B, V 필터 FITS 이미지를 업로드하면,  
-별들의 색지수(B–V)를 계산하여 소광(빛 흡수 및 산란)을 추정합니다.
-""")
+uploaded_file = st.file_uploader("FITS 이미지 업로드", type=['fits'])
 
-uploaded_b = st.file_uploader("🔵 B 필터 FITS 파일 업로드", type=['fits'])
-uploaded_v = st.file_uploader("🟡 V 필터 FITS 파일 업로드", type=['fits'])
+# 위치 및 시간 입력
+lat = st.number_input("관측지 위도(°)", value=37.5665)
+lon = st.number_input("관측지 경도(°)", value=126.9780)
+obs_time = st.text_input("관측 시각 (UTC, 예: 2025-07-10 12:00:00)", value=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
 
-def extract_star_brightness(data, threshold=1000):
-    # 단순 임계값으로 별 영역 픽셀 선택
-    stars = data > threshold
-    return data[stars]
-
-if uploaded_b and uploaded_v:
+if uploaded_file:
     try:
-        with fits.open(uploaded_b) as b_hdul, fits.open(uploaded_v) as v_hdul:
-            b_data = np.nan_to_num(b_hdul[0].data)
-            v_data = np.nan_to_num(v_hdul[0].data)
+        # FITS 열기
+        with fits.open(uploaded_file) as hdul:
+            data = np.nan_to_num(hdul[0].data)
+            header = hdul[0].header
 
-            # 밝기 추출 (임계값 초과하는 픽셀만)
-            b_stars = extract_star_brightness(b_data)
-            v_stars = extract_star_brightness(v_data)
+        # 천체 좌표 읽기 (RA, DEC)
+        if 'RA' in header and 'DEC' in header:
+            ra = header['RA']
+            dec = header['DEC']
 
-            # 별 수 맞추기 위해 작은 쪽 크기에 맞춤
-            n = min(len(b_stars), len(v_stars))
-            b_stars = b_stars[:n]
-            v_stars = v_stars[:n]
+            # 관측 시간, 위치 설정
+            location = EarthLocation(lat=lat, lon=lon)
+            time = Time(obs_time)
 
-            # 색지수 배열 계산
-            color_index = b_stars - v_stars
+            # 천체 고도 계산
+            sky_coord = SkyCoord(ra=ra, dec=dec, unit=('hourangle', 'deg'))
+            altaz = sky_coord.transform_to(AltAz(obstime=time, location=location))
+            altitude = altaz.alt.degree
 
-            # 소광 추정을 위해 기준 내재 색지수 예시 (0.0 이상 ~ 0.5 이하)
-            intrinsic_bv = 0.3
+            # air mass 근사 계산
+            if altitude > 0:
+                air_mass = 1 / np.sin(np.radians(altitude))
+            else:
+                air_mass = float('inf')  # 지평선 아래는 무한대
 
-            # 소광량 A_v = 3.1 * E(B–V), 여기서 E(B–V) = 관측색지수 - 내재색지수
-            E_bv = np.mean(color_index) - intrinsic_bv
-            A_v = 3.1 * E_bv
+            # 대기 소광량 (mag), 보통 k=0.2 ~ 0.3 mag/airmass 가 보통
+            k = 0.25  # 대기 투과 계수 (임의 값)
+            extinction = k * air_mass
 
-            st.success("✅ 소광 계산 완료!")
-            st.metric("평균 관측 B–V 색지수", f"{np.mean(color_index):.2f}")
-            st.metric("추정 소광량 A_v (mag)", f"{A_v:.2f}")
+            # 이미지 평균 밝기와 보정
+            mean_brightness = np.mean(data)
+            corrected_brightness = mean_brightness * 10**(0.4 * extinction)
 
-            # 색지수 히스토그램
-            fig, ax = plt.subplots()
-            ax.hist(color_index, bins=30, color='purple', alpha=0.7)
-            ax.axvline(intrinsic_bv, color='orange', linestyle='--', label='기준 내재색지수')
-            ax.set_xlabel("B–V 색지수")
-            ax.set_ylabel("별 수")
-            ax.legend()
-            st.pyplot(fig)
+            st.metric("관측 천체 고도 (°)", f"{altitude:.2f}")
+            st.metric("대기 광경로 (Air Mass)", f"{air_mass:.2f}")
+            st.metric("대기 소광량 (mag)", f"{extinction:.2f}")
+            st.metric("평균 밝기 (관측값)", f"{mean_brightness:.2f}")
+            st.metric("평균 밝기 (대기 보정 후)", f"{corrected_brightness:.2f}")
+
+        else:
+            st.warning("FITS 헤더에 RA, DEC 정보가 없습니다.")
 
     except Exception as e:
         st.error(f"오류 발생: {e}")
-
 else:
-    st.info("B, V 필터 FITS 파일을 모두 업로드 해주세요.")
+    st.info("FITS 파일을 업로드하세요.")
