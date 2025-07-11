@@ -72,3 +72,7 @@ if uploaded_file:
         st.error(f"오류 발생: {e}")
 else:
     st.info("FITS 파일을 업로드하세요.")
+uploaded_file = st.file_uploader(
+    "FITS 또는 압축 FITS 파일 업로드",
+    type=['fits', 'fit', 'fz']
+)
