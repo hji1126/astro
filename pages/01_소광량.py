@@ -76,3 +76,14 @@ uploaded_file = st.file_uploader(
     "FITS 또는 압축 FITS 파일 업로드",
     type=['fits', 'fit', 'fz']
 )
+from astropy.io import fits
+
+# .fz 압축 FITS 파일 경로
+input_fz = '파일경로/filename.fz'
+
+# 변환할 .fits 파일 경로
+output_fits = '파일경로/filename.fits'
+
+# 압축 해제 후 저장
+with fits.open(input_fz) as hdul:
+    hdul.writeto(output_fits, overwrite=True)
