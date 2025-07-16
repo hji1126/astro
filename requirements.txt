@@ -3,3 +3,4 @@ astropy
 numpy
 pillow
 matplotlib
+scikit-image
