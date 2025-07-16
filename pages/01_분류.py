@@ -58,3 +58,14 @@ if uploaded_file is not None:
             st.success("분류 결과: 나선 은하 가능성 높음")
         else:
             st.success("분류 결과: 불규칙 은하 가능성")
+import streamlit as st
+
+st.title("은하 분류 페이지")
+
+uploaded_file = st.file_uploader("FITS 파일 업로드 (분류용)", type=['fits', 'fit'])
+
+if uploaded_file is not None:
+    st.write(f"{uploaded_file.name} 파일 업로드 완료!")
+    # 여기서 이미지 분석 코드 실행
+else:
+    st.info("파일을 업로드해주세요.")
