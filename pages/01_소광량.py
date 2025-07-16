@@ -8,84 +8,53 @@ st.write("이것은 간단한 텍스트입니다.")
 
 st.success("성공적으로 앱이 실행되었습니다! 🎉")
 import streamlit as st
-import numpy as np
 from astropy.io import fits
-from astropy.coordinates import SkyCoord, EarthLocation, AltAz
-from astropy.time import Time
-from datetime import datetime
+import numpy as np
+import matplotlib.pyplot as plt
+from PIL import Image
+from skimage.filters import threshold_otsu
+from skimage.measure import label, regionprops
 
-st.title("🌌 우주망원경 vs 지상망원경 대기 소광계수 추정 앱")
+st.title("나선/타원/불규칙 은하 분류 앱")
 
-# 파일 업로드
-space_file = st.file_uploader("우주망원경 FITS 파일 업로드 (대기 소광 없음)", type=['fits', 'fit', 'fz'])
-ground_file = st.file_uploader("지상망원경 FITS 파일 업로드 (예: U 필터)", type=['fits', 'fit', 'fz'])
+uploaded_file = st.file_uploader("FITS 이미지 업로드", type=['fits', 'fit'])
 
-# 관측 위치, 시간 입력
-lat = st.number_input("관측지 위도 (°)", value=37.5665)
-lon = st.number_input("관측지 경도 (°)", value=126.9780)
-obs_time = st.text_input("관측 시각 (UTC, 예: 2025-07-10 12:00:00)", value=datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'))
-
-def mean_brightness(data, threshold=1000):
-    """단순 임계값 기반 밝기 추출"""
-    stars = data > threshold
-    if np.any(stars):
-        return np.mean(data[stars])
+if uploaded_file is not None:
+    # FITS 파일 열기
+    hdul = fits.open(uploaded_file)
+    data = hdul[0].data
+    
+    # 데이터 시각화 (이미지 축소 및 정규화)
+    img = data
+    img = np.nan_to_num(img)  # NaN 제거
+    img = img - np.min(img)
+    img = img / np.max(img)
+    img = (img * 255).astype(np.uint8)
+    
+    st.image(img, caption="은하 이미지", use_column_width=True)
+    
+    # 간단한 특징 추출 예: 밝기 중심, 타원도, 면적 등
+    binary = img > threshold_otsu(img)  # 이진화
+    
+    label_img = label(binary)
+    regions = regionprops(label_img)
+    
+    if len(regions) == 0:
+        st.write("은하가 감지되지 않았습니다.")
     else:
-        return np.mean(data)
-
-if space_file and ground_file:
-    try:
-        # FITS 데이터 읽기
-        with fits.open(space_file) as hdul_s, fits.open(ground_file) as hdul_g:
-            data_s = np.nan_to_num(hdul_s[0].data)
-            data_g = np.nan_to_num(hdul_g[0].data)
-            header = hdul_g[0].header
-
-        # 밝기 계산
-        brightness_space = mean_brightness(data_s)
-        brightness_ground = mean_brightness(data_g)
-
-        # 천체 좌표 읽기 (우선 지상 관측 헤더에서)
-        if 'RA' in header and 'DEC' in header:
-            ra = header['RA']
-            dec = header['DEC']
-            location = EarthLocation(lat=lat, lon=lon)
-            time = Time(obs_time)
-            sky_coord = SkyCoord(ra=ra, dec=dec, unit=('hourangle', 'deg'))
-            altaz = sky_coord.transform_to(AltAz(obstime=time, location=location))
-            altitude = altaz.alt.degree
-
-            # air mass 계산
-            if altitude > 0:
-                air_mass = 1 / np.sin(np.radians(altitude))
-            else:
-                air_mass = float('inf')
-
-            # 소광량 (mag) = -2.5 * log10(밝기 비율)
-            extinction_mag = -2.5 * np.log10(brightness_ground / brightness_space)
-
-            # 대기 소광계수 k = extinction_mag / air_mass
-            if air_mass == float('inf'):
-                k = None
-                st.warning("천체가 지평선 아래에 있어 소광계수 계산 불가")
-            else:
-                k = extinction_mag / air_mass
-
-            # 결과 출력
-            st.metric("관측 천체 고도 (°)", f"{altitude:.2f}")
-            st.metric("대기 광경로 (Air Mass)", f"{air_mass:.2f}")
-            st.metric("대기 소광량 (mag)", f"{extinction_mag:.2f}")
-            if k is not None:
-                st.metric("대기 소광계수 k (mag/airmass)", f"{k:.3f}")
-
-            # 추가 시각화 가능 (밝기 비교 등)
-            st.write(f"우주망원경 평균 밝기: {brightness_space:.2f}")
-            st.write(f"지상망원경 평균 밝기: {brightness_ground:.2f}")
-
+        # 가장 큰 영역 선택
+        largest_region = max(regions, key=lambda r: r.area)
+        
+        # 특징 출력
+        eccentricity = largest_region.eccentricity
+        area = largest_region.area
+        st.write(f"영역 면적: {area}")
+        st.write(f"타원도 (eccentricity): {eccentricity:.3f}")
+        
+        # 간단한 분류 기준 (임시)
+        if eccentricity < 0.5:
+            st.success("분류 결과: 타원 은하")
+        elif eccentricity >= 0.5 and eccentricity < 0.85:
+            st.success("분류 결과: 나선 은하 가능성 높음")
         else:
-            st.warning("FITS 헤더에 RA, DEC 정보가 없습니다.")
-
-    except Exception as e:
-        st.error(f"오류 발생: {e}")
-else:
-    st.info("우주망원경 및 지상망원경 FITS 파일을 모두 업로드하세요.")
+            st.success("분류 결과: 불규칙 은하 가능성")
